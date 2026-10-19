@@ -1,0 +1,68 @@
+name: Import Source and Build iPhone IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/bootstrap-cloud.yml'
+      - 'precision-source.patch'
+permissions:
+  contents: write
+concurrency:
+  group: bootstrap-precision-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Import pinned upstream and apply reviewed source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f StikDebug/Views/PrecisionLocationView.swift ]; then
+            git fetch --depth=1 https://github.com/StikDebug/StikDebug.git 70f761c65f51a76f6614a68042e75583b887c822
+            git archive FETCH_HEAD | tar -xf -
+            git apply --check precision-source.patch
+            git apply precision-source.patch
+            git add .
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import pinned StikDebug with precision location controls'
+            git push origin HEAD:main
+          fi
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.6'
+      - name: Record toolchain and verify actual Swift geodesy
+        run: |
+          xcodebuild -version
+          swift --version
+          cat StikDebug/Services/PrecisionGeodesy.swift scripts/geodesy-check.swift > "$RUNNER_TEMP/geodesy-check.swift"
+          swift "$RUNNER_TEMP/geodesy-check.swift"
+      - name: Compile unsigned device archive
+        run: |
+          xcodebuild archive -project StikDebug.xcodeproj -scheme StikDebug \
+            -configuration Debug -archivePath build/PrecisionLocation.xcarchive \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO SWIFT_OPTIMIZATION_LEVEL="-Onone" \
+            -resultBundlePath build/PrecisionLocation.xcresult
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/package/Payload
+          cp -R build/PrecisionLocation.xcarchive/Products/Applications/StikDebug.app build/package/Payload/
+          cd build/package
+          zip -r ../PrecisionLocation-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrecisionLocation-unsigned
+          path: build/PrecisionLocation-unsigned.ipa
+          retention-days: 7
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrecisionLocation-build-diagnostics
+          path: build/PrecisionLocation.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+
