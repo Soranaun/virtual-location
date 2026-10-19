@@ -23,8 +23,8 @@ jobs:
           if [ ! -f StikDebug/Views/PrecisionLocationView.swift ]; then
             git fetch --depth=1 https://github.com/StikDebug/StikDebug.git 70f761c65f51a76f6614a68042e75583b887c822
             git archive FETCH_HEAD | tar -xf -
-            git apply --check precision-source.patch
-            git apply precision-source.patch
+            git apply --check --exclude='.github/workflows/precision-ipa.yml' precision-source.patch
+            git apply --exclude='.github/workflows/precision-ipa.yml' precision-source.patch
             git add .
             git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import pinned StikDebug with precision location controls'
             git push origin HEAD:main
