@@ -1,0 +1,60 @@
+name: Build Precision Location IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'StikDebug/**'
+      - 'StikDebug.xcodeproj/**'
+      - 'scripts/**'
+      - '.github/workflows/precision-ipa.yml'
+permissions:
+  contents: read
+concurrency:
+  group: precision-ipa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.6'
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test actual Swift geodesy implementation
+        run: |
+          cat StikDebug/Services/PrecisionGeodesy.swift scripts/geodesy-check.swift > "$RUNNER_TEMP/geodesy-check.swift"
+          swift "$RUNNER_TEMP/geodesy-check.swift"
+      - name: Compile unsigned device archive
+        run: |
+          xcodebuild archive -project StikDebug.xcodeproj -scheme StikDebug \
+            -configuration Debug -archivePath build/PrecisionLocation.xcarchive \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO SWIFT_OPTIMIZATION_LEVEL="-Onone" \
+            -resultBundlePath build/PrecisionLocation.xcresult
+      - name: Package IPA for later signing
+        run: |
+          mkdir -p build/package/Payload
+          cp -R build/PrecisionLocation.xcarchive/Products/Applications/StikDebug.app build/package/Payload/
+          cd build/package
+          zip -r ../PrecisionLocation-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrecisionLocation-unsigned
+          path: build/PrecisionLocation-unsigned.ipa
+          retention-days: 7
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrecisionLocation-build-diagnostics
+          path: build/PrecisionLocation.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+
